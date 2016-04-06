@@ -1,0 +1,2 @@
+# clipsync
+clipboard synchronizer
