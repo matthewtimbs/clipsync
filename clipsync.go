@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"time"
@@ -14,39 +15,41 @@ import (
 )
 
 type clipContents struct {
-	contents string
-	hash     [20]byte
+	Contents string
+	Hash     [20]byte
 }
 
+var server string
+var localContents clipContents
+
 func main() {
-	server, port := "", ""
+	server := ""
 	app := cli.NewApp()
 	app.Name = "clipsync"
 	app.Usage = "Synchronizes clipboards between machines. Run as Server on one machine, run as client on another"
 	app.Flags = []cli.Flag{
-		cli.StringFlag{Name: "server, s", Value: "127.0.0.1", Usage: "Hostname or IP of server clipsync process.  Use default for server, or specify an IP to run as client", Destination: &server},
-		cli.StringFlag{Name: "port, p", Value: "7564", Usage: "Port number", Destination: &port},
+		cli.StringFlag{Name: "server, s", Value: "127.0.0.1:7569", Usage: "Hostname or IP of server clipsync process and port number.  Use default for server, or specify an IP to run as client", Destination: &server},
 	}
 	app.Action = func(c *cli.Context) {
-		runApp(server, int(port))
+		runApp(server)
 	}
 
 	app.Run(os.Args)
 
 }
 
-func runApp(server string, port int) {
+func runApp(server string) {
 	//endLoop := make(chan struct{})
 
-	fmt.Printf("Press enter to quit")
+	fmt.Printf("Press enter to quit\n")
 
 	//Kick off the sync process
 	endLoop := pushLoop()
 
 	//Kick off the server process
+	fmt.Printf("Listening on: %s\n", server)
 	http.HandleFunc("/", handleServerRequest)
-	//fmt.Println(c.Args()[])
-	//http.ListenAndServe(c.Args()["port, p"])
+	go http.ListenAndServe(server, nil)
 
 	//Block until done.
 	reader := bufio.NewReader(os.Stdin)
@@ -78,11 +81,26 @@ func pushLoop() chan struct{} {
 
 func syncClipboard() {
 
-	//get local clipboard contents
+	//get local clipboard contents & update copy
 	contents, _ := clipboard.ReadAll()
 	hash := sha1.Sum([]byte(contents))
+	localContents.Contents = contents
+	localContents.Hash = hash
 
-	fmt.Printf("%x\n", hash)
+	//get remote
+	resp, err := http.Get(server)
+	if err != nil {
+		fmt.Printf("Error contacting server: %s", server)
+	} else {
+		defer resp.Body.Close()
+		contents, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Printf("%s", err)
+		}
+		fmt.Printf("%s\n", string(contents))
+	}
+
+	fmt.Printf("%x\r", hash)
 }
 
 func handleServerRequest(w http.ResponseWriter, r *http.Request) {
