@@ -43,13 +43,15 @@ func runApp(server string) {
 
 	fmt.Printf("Press enter to quit\n")
 
-	//Kick off the sync process
-	endLoop := pushLoop()
-
 	//Kick off the server process
 	fmt.Printf("Listening on: %s\n", server)
+
 	http.HandleFunc("/", handleServerRequest)
+	fmt.Printf("...server: %s", server)
 	go http.ListenAndServe(server, nil)
+
+	//Kick off the sync process
+	endLoop := pushLoop()
 
 	//Block until done.
 	reader := bufio.NewReader(os.Stdin)
@@ -88,9 +90,11 @@ func syncClipboard() {
 	localContents.Hash = hash
 
 	//get remote
-	resp, err := http.Get(server)
+	url := "http://" + server
+	fmt.Printf("host: %s", url)
+	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("Error contacting server: %s", server)
+		fmt.Printf("Error contacting server: %s, error: %s", server, err.Error())
 	} else {
 		defer resp.Body.Close()
 		contents, err := ioutil.ReadAll(resp.Body)
