@@ -7,7 +7,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
@@ -121,13 +120,20 @@ func syncClipboard() {
 	//if clipsync client copy != clipsync server copy...
 	if localContents.Hash != remoteServerClipContents.Hash {
 		if remoteServerClipContents == nil || localContents.UpdateTime.Sub(remoteServerClipContents.UpdateTime) > 1 {
-			//if server has nothing or clipsync client copy newer, post to server
+
+			fmt.Printf("Need to post \n%s\n\n", remoteServerClipContents.Contents)
+
+			/*//if server has nothing or clipsync client copy newer, post to server
 			byteArray, _ := json.Marshal(localContents)
 			r := bytes.NewReader(byteArray)
 			if err == nil {
-				http.NewRequest("POST", server, r)
-				fmt.Printf("Debug: Client Pushed Clipboard to Server\n")
-			}
+				req, _ := http.NewRequest("POST", server, r)
+				req.Header.Add("content-type", "application/json")
+				res, _ := http.DefaultClient.Do(req)
+				fmt.Printf("Debug: Client Pushed Clipboard to Server %s\n", server)
+			}*/
+
+			//Do post.
 
 		} else {
 			//clipsync server copy newer, update client copy
@@ -145,14 +151,16 @@ func syncClipboard() {
 func handleServerRequest(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
+		fmt.Printf("Debug - Server, get")
 		json.NewEncoder(w).Encode(serverContents)
 	case "POST":
+		fmt.Printf("Debug - Server, post")
 		postedClipContents := new(clipContents)
 		err := json.NewDecoder(r.Body).Decode(postedClipContents)
 		if err != nil {
-			fmt.Printf("posted contents: %s", postedClipContents)
+			fmt.Printf("Debug: Server - posted contents: %s", postedClipContents)
 		} else {
-			//fmt.Printf(">>>postedContents %s, error: %s\n", postedClipContents, err)
+			fmt.Printf("Debug: Server - postedContents %s, error: %s\n", postedClipContents, err)
 		}
 		serverContents = *postedClipContents
 		serverContents.UpdateTime = time.Now()
