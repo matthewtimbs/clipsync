@@ -7,14 +7,19 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha1"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/briandowns/spinner"
 	"github.com/codegangsta/cli"
 )
 
@@ -24,16 +29,25 @@ type clipContents struct {
 	UpdateTime time.Time
 }
 
+const defaultPort = "7569"
+
+var defaultServer string
 var server string
+var verbose bool
+var isClientOnly bool
 var localContents clipContents
 var serverContents clipContents
 
 func main() {
+
+	defaultServer = getLocalIPAddress() + ":" + defaultPort
 	app := cli.NewApp()
 	app.Name = "clipsync"
 	app.Usage = "Synchronizes clipboards between machines. Run as Server on one machine, run as client on another"
 	app.Flags = []cli.Flag{
-		cli.StringFlag{Name: "server, s", Value: "127.0.0.1:7569", Usage: "Hostname or IP of server clipsync process and port number.  Use default for server, or specify an IP to run as client", Destination: &server},
+		cli.StringFlag{Name: "server, s", Value: defaultServer, Usage: "Hostname or IP of server clipsync process and port number.  Use default for server, or specify an IP to run as client", Destination: &server},
+		cli.BoolFlag{Name: "verbose, V", Usage: "Verbose output", Destination: &verbose},
+		cli.BoolFlag{Name: "isClientOnly, c", Usage: "Sync Client only (must specify remote server)"},
 	}
 	app.Action = func(c *cli.Context) {
 		runApp()
@@ -45,13 +59,20 @@ func main() {
 
 func runApp() {
 	fmt.Printf("Press enter to quit\n")
+	s := spinner.New(spinner.CharSets[9], 100*time.Millisecond)
+
+	if !verbose {
+		log.SetOutput(ioutil.Discard)
+		s.Start()
+	}
 
 	//Kick off the server process
-	fmt.Printf("Listening on: %s\n", server)
-
-	http.HandleFunc("/", handleServerRequest)
-	fmt.Printf("...server: %s", server)
-	go http.ListenAndServe(server, nil)
+	if !isClientOnly {
+		fmt.Printf("Running clipSync server on: %s\n", server)
+		http.HandleFunc("/", handleServerRequest)
+		log.Printf("...server: %s", server)
+		go http.ListenAndServe(server, nil)
+	}
 
 	//Kick off the sync process
 	endLoop := pushLoop()
@@ -59,15 +80,16 @@ func runApp() {
 	//Block until done.
 	reader := bufio.NewReader(os.Stdin)
 	reader.ReadString('\n')
-	fmt.Printf("quitting!!!")
 	endLoop <- struct{}{} //send literal of type struct{}
+
+	s.Stop()
 }
 
 func pushLoop() chan struct{} {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	quit := make(chan struct{})
 
-	fmt.Printf("Syncing clipboard with server %s", server)
+	log.Printf("Syncing clipboard with server %s", server)
 
 	go func() {
 		for {
@@ -97,7 +119,7 @@ func syncClipboard() {
 		localContents.Contents = contents
 		localContents.Hash = hash
 		localContents.UpdateTime = time.Now() //Note: won't work if machines are in different timezones
-		fmt.Printf("Debug: Client Updated Local Copy From OS\n")
+		log.Printf("Debug: Client Updated Local Copy From OS\n")
 	}
 
 	remoteServerClipContents := new(clipContents)
@@ -106,61 +128,63 @@ func syncClipboard() {
 	resp, err := http.Get("http://" + server)
 
 	if err != nil {
-		fmt.Printf("Error contacting server: %s, error: %s\n", server, err.Error())
+		log.Printf("Error contacting server: %s, error: %s\n", server, err.Error())
 	} else {
 		err := json.NewDecoder(resp.Body).Decode(remoteServerClipContents)
 		if err != nil {
-			fmt.Printf("error: %s\n", err)
+			log.Printf("error: %s\n", err)
 		}
-		fmt.Printf(">>>>>>>>>>>%s", remoteServerClipContents) //TODO MJT, not getting good stuff here.
+		//fmt.Printf(">>>>>>>>>>>%s", remoteServerClipContents) //TODO MJT, not getting good stuff here.
 	}
 
-	fmt.Printf("local: %s, server %s\n", localContents.Hash, remoteServerClipContents.Hash)
+	log.Printf("local: %s, server %s\n", localContents.Hash, remoteServerClipContents.Hash)
 
 	//if clipsync client copy != clipsync server copy...
 	if localContents.Hash != remoteServerClipContents.Hash {
 		if remoteServerClipContents == nil || localContents.UpdateTime.Sub(remoteServerClipContents.UpdateTime) > 1 {
 
-			fmt.Printf("Need to post \n%s\n\n", remoteServerClipContents.Contents)
+			log.Printf("Need to post \n%s\n\n", remoteServerClipContents.Contents)
 
-			/*//if server has nothing or clipsync client copy newer, post to server
+			//if server has nothing or clipsync client copy newer, post to server
+			_ = "breakpoint"
 			byteArray, _ := json.Marshal(localContents)
-			r := bytes.NewReader(byteArray)
+			reader := bytes.NewReader(byteArray)
 			if err == nil {
-				req, _ := http.NewRequest("POST", server, r)
+				req, _ := http.NewRequest("POST", "http://"+server, reader)
 				req.Header.Add("content-type", "application/json")
-				res, _ := http.DefaultClient.Do(req)
-				fmt.Printf("Debug: Client Pushed Clipboard to Server %s\n", server)
-			}*/
+				http.DefaultClient.Do(req)
+				log.Printf("Debug: Client Pushed Clipboard to Server %s ", server)
+			}
 
 			//Do post.
 
 		} else {
 			//clipsync server copy newer, update client copy
 			localContents = *remoteServerClipContents
-			fmt.Printf("Debug: Client Updated Local Copy From Server\n")
+			log.Printf("Debug: Client Updated Local Copy From Server\n")
 
 			//Update  OS clipboard
 			clipboard.WriteAll(remoteServerClipContents.Contents)
-			fmt.Printf("Debug: Client Updated OS Clipboard From Server\n")
+			log.Printf("Debug: Client Updated OS Clipboard From Server\n")
 		}
 	}
-	//fmt.Printf("%x\r", hash)
+	//log.Printf("%x\r", hash)
 }
 
 func handleServerRequest(w http.ResponseWriter, r *http.Request) {
+	_ = "breakpoint"
 	switch r.Method {
 	case "GET":
-		fmt.Printf("Debug - Server, get")
+		log.Printf("Debug - Server, get")
 		json.NewEncoder(w).Encode(serverContents)
 	case "POST":
-		fmt.Printf("Debug - Server, post")
+		log.Printf("Debug - Server, post")
 		postedClipContents := new(clipContents)
 		err := json.NewDecoder(r.Body).Decode(postedClipContents)
 		if err != nil {
-			fmt.Printf("Debug: Server - posted contents: %s", postedClipContents)
+			log.Printf("Debug: Server - posted contents: %s", postedClipContents)
 		} else {
-			fmt.Printf("Debug: Server - postedContents %s, error: %s\n", postedClipContents, err)
+			log.Printf("Debug: Server - postedContents %s, error: %s\n", postedClipContents, err)
 		}
 		serverContents = *postedClipContents
 		serverContents.UpdateTime = time.Now()
@@ -168,4 +192,20 @@ func handleServerRequest(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "page not found", http.StatusNotFound)
 	}
+}
+
+func getLocalIPAddress() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, address := range addrs {
+		// check the address type and if it is not a loopback the display it
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
 }
