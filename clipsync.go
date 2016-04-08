@@ -93,49 +93,53 @@ func syncClipboard() {
 	contents, _ := clipboard.ReadAll()
 	hash := sha1.Sum([]byte(contents))
 
-	//Update clipsync client's copy if it's different
+	//Update clipsync client's copy if it's empty or the OS clipboard copy has changed
 	if localContents.Hash != hash {
 		localContents.Contents = contents
 		localContents.Hash = hash
 		localContents.UpdateTime = time.Now() //Note: won't work if machines are in different timezones
+		fmt.Printf("Debug: Client Updated Local Copy From OS\n")
 	}
 
 	remoteServerClipContents := new(clipContents)
 
 	//Get clipsync server's copy
 	resp, err := http.Get("http://" + server)
+
 	if err != nil {
 		fmt.Printf("Error contacting server: %s, error: %s\n", server, err.Error())
 	} else {
 		err := json.NewDecoder(resp.Body).Decode(remoteServerClipContents)
 		if err != nil {
-			fmt.Printf("remote server contents: %s", remoteServerClipContents)
-		} else {
 			fmt.Printf("error: %s\n", err)
 		}
-		fmt.Printf("\r%s", string(contents))
+		fmt.Printf(">>>>>>>>>>>%s", remoteServerClipContents) //TODO MJT, not getting good stuff here.
 	}
+
+	fmt.Printf("local: %s, server %s\n", localContents.Hash, remoteServerClipContents.Hash)
 
 	//if clipsync client copy != clipsync server copy...
 	if localContents.Hash != remoteServerClipContents.Hash {
-		if localContents.UpdateTime.Sub(remoteServerClipContents.UpdateTime) > 1 {
-			//if clipsync client copy newer, post to server
+		if remoteServerClipContents == nil || localContents.UpdateTime.Sub(remoteServerClipContents.UpdateTime) > 1 {
+			//if server has nothing or clipsync client copy newer, post to server
 			byteArray, _ := json.Marshal(localContents)
 			r := bytes.NewReader(byteArray)
 			if err == nil {
 				http.NewRequest("POST", server, r)
+				fmt.Printf("Debug: Client Pushed Clipboard to Server\n")
 			}
 
 		} else {
 			//clipsync server copy newer, update client copy
 			localContents = *remoteServerClipContents
+			fmt.Printf("Debug: Client Updated Local Copy From Server\n")
 
 			//Update  OS clipboard
-			//TODO MJT
+			clipboard.WriteAll(remoteServerClipContents.Contents)
+			fmt.Printf("Debug: Client Updated OS Clipboard From Server\n")
 		}
 	}
-
-	fmt.Printf("%x\r", hash)
+	//fmt.Printf("%x\r", hash)
 }
 
 func handleServerRequest(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +152,7 @@ func handleServerRequest(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			fmt.Printf("posted contents: %s", postedClipContents)
 		} else {
-			fmt.Printf(">>>postedContents %s, error: %s\n", postedClipContents, err)
+			//fmt.Printf(">>>postedContents %s, error: %s\n", postedClipContents, err)
 		}
 		serverContents = *postedClipContents
 		serverContents.UpdateTime = time.Now()
