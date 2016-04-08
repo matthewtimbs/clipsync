@@ -47,7 +47,7 @@ func main() {
 	app.Flags = []cli.Flag{
 		cli.StringFlag{Name: "server, s", Value: defaultServer, Usage: "Hostname or IP of server clipsync process and port number.  Use default for server, or specify an IP to run as client", Destination: &server},
 		cli.BoolFlag{Name: "verbose, V", Usage: "Verbose output", Destination: &verbose},
-		cli.BoolFlag{Name: "isClientOnly, c", Usage: "Sync Client only (must specify remote server)"},
+		cli.BoolFlag{Name: "isClientOnly, c", Usage: "Sync Client only (must specify remote server)", Destination: &isClientOnly},
 	}
 	app.Action = func(c *cli.Context) {
 		runApp()
