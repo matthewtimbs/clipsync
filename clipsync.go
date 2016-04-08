@@ -2,8 +2,7 @@ package main
 
 //TODO Extract server and client, common api.
 //TODO refactor get/post
-//TODO Extract ClipContents with JSON methods
-//TODO rename SErver to URL
+//TODO Do some error handling
 
 import (
 	"bufio"
@@ -89,7 +88,7 @@ func pushLoop() chan struct{} {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	quit := make(chan struct{})
 
-	log.Printf("Syncing clipboard with server %s", server)
+	fmt.Printf("Synchronizing clipboard with server %s\n", server)
 
 	go func() {
 		for {
